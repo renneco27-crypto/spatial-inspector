@@ -1,0 +1,7 @@
+node_modules/
+.DS_Store
+Thumbs.db
+*.log
+spatial_anomalies.json
+3d-inspector.html
+screenshot.png

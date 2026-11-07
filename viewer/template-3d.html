@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Antigravity 3D Spatial Stacking Inspector</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+    body {
+      background: #0d0f12;
+      color: #f1f3f5;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      overflow: hidden;
+      height: 100vh;
+      width: 100vw;
+    }
+    #viewport { width: 100%; height: 100%; display: block; }
+
+    /* Top Control Bar */
+    .hud-top {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      right: 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      pointer-events: none;
+      z-index: 10;
+    }
+    .hud-card {
+      pointer-events: auto;
+      background: rgba(18, 22, 28, 0.78);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 14px;
+      padding: 10px 18px;
+      box-shadow: 0 12px 32px rgba(0,0,0,0.45);
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .title-badge {
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: #60a5fa;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .title-badge::before {
+      content: '';
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #3b82f6;
+      box-shadow: 0 0 10px #3b82f6;
+    }
+
+    /* Slider & Filter Controls */
+    .ctrl-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+      color: #94a3b8;
+    }
+    input[type=range] {
+      accent-color: #3b82f6;
+      cursor: pointer;
+      width: 110px;
+    }
+    .btn {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.12);
+      color: #e2e8f0;
+      padding: 6px 12px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all .15s ease;
+    }
+    .btn:hover {
+      background: rgba(255,255,255,0.14);
+      color: #fff;
+    }
+    .btn.active {
+      background: #2563eb;
+      border-color: #3b82f6;
+      color: #fff;
+      box-shadow: 0 0 12px rgba(37,99,235,0.4);
+    }
+    .btn-anomaly {
+      background: rgba(239, 68, 68, 0.18);
+      border-color: rgba(239, 68, 68, 0.4);
+      color: #fca5a5;
+    }
+    .btn-anomaly:hover {
+      background: rgba(239, 68, 68, 0.3);
+      color: #fff;
+    }
+
+    /* Element Inspector HUD (Bottom Right) */
+    .hud-inspector {
+      position: absolute;
+      bottom: 20px;
+      right: 20px;
+      width: 340px;
+      background: rgba(15, 20, 26, 0.88);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 16px;
+      padding: 16px;
+      box-shadow: 0 20px 48px rgba(0,0,0,0.6);
+      z-index: 10;
+      pointer-events: auto;
+      font-size: 12px;
+      transition: opacity .2s ease;
+    }
+    .hud-inspector h3 {
+      font-size: 14px;
+      font-weight: 600;
+      color: #f8fafc;
+      margin-bottom: 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      word-break: break-all;
+    }
+    .badge {
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .badge-p0 { background: #dc2626; color: #fff; box-shadow: 0 0 8px rgba(220,38,38,0.5); }
+    .badge-p1 { background: #d97706; color: #fff; }
+    .badge-ok { background: #059669; color: #fff; }
+    .hud-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 4px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+      color: #94a3b8;
+    }
+    .hud-row span:last-child {
+      color: #e2e8f0;
+      font-family: monospace;
+      font-weight: 500;
+    }
+    .color-swatch-box {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .swatch-dot {
+      width: 11px;
+      height: 11px;
+      border-radius: 3px;
+      border: 1px solid rgba(255,255,255,0.4);
+      display: inline-block;
+    }
+    .hud-alert {
+      margin-top: 10px;
+      padding: 10px;
+      border-radius: 8px;
+      background: rgba(220, 38, 38, 0.14);
+      border: 1px solid rgba(220, 38, 38, 0.35);
+      color: #fca5a5;
+      font-size: 11px;
+      line-height: 1.4;
+    }
+
+    /* Stats Pill (Bottom Left) */
+    .hud-stats {
+      position: absolute;
+      bottom: 20px;
+      left: 20px;
+      background: rgba(18, 22, 28, 0.78);
+      backdrop-filter: blur(14px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 12px;
+      padding: 8px 16px;
+      font-size: 11px;
+      color: #64748b;
+      display: flex;
+      gap: 16px;
+      z-index: 10;
+    }
+    .hud-stats b { color: #f1f5f9; }
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+  <div class="hud-top">
+    <div class="hud-card">
+      <div class="title-badge">Antigravity 3D View</div>
+      <div class="ctrl-group">
+        <label>Z-Extrusion</label>
+        <input type="range" id="zScale" min="0" max="60" value="18">
+        <span id="zVal">18x</span>
+      </div>
+      <div class="ctrl-group">
+        <label>Opacity</label>
+        <input type="range" id="layerOpacity" min="0.1" max="1" step="0.05" value="0.75">
+      </div>
+      <button class="btn" id="btnWire">Wireframe</button>
+      <button class="btn" id="btnReset">Reset View</button>
+    </div>
+
+    <div class="hud-card">
+      <button class="btn active" id="fAll">All</button>
+      <button class="btn" id="fBtn">Buttons & Links</button>
+      <button class="btn" id="fText">Text</button>
+      <button class="btn" id="fColor">Color / Contrast</button>
+      <button class="btn btn-anomaly" id="fAnom">Anomalies (<span id="anomCount">0</span>)</button>
+    </div>
+  </div>
+
+  <div class="hud-inspector" id="inspectorCard">
+    <h3 id="insTitle">Hover a Layer <span class="badge badge-ok" id="insBadge">Ready</span></h3>
+    <div class="hud-row"><span>Selector</span><span id="insSel">-</span></div>
+    <div class="hud-row"><span>Position</span><span id="insPos">-</span></div>
+    <div class="hud-row"><span>Stacking Depth</span><span id="insDepth">-</span></div>
+    <div class="hud-row"><span>Z-Index</span><span id="insZ">-</span></div>
+    <div class="hud-row"><span>Dimensions</span><span id="insDim">-</span></div>
+    <div class="hud-row"><span>Text Snippet</span><span id="insText" style="max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">-</span></div>
+    <div class="hud-row" id="rowColors" style="display:none;"><span>Colors</span><span id="insColors">-</span></div>
+    <div class="hud-row" id="rowContrast" style="display:none;"><span>Color / Contrast</span><span id="insContrast">-</span></div>
+    <div class="hud-alert" id="insAlert" style="display:none;"></div>
+  </div>
+
+  <div class="hud-stats">
+    <div>Total Elements: <b id="statTotal">0</b></div>
+    <div>Interactive: <b id="statInter">0</b></div>
+    <div>Collisions / Blockers: <b id="statAnom" style="color:#f87171;">0</b></div>
+  </div>
+
+  <canvas id="viewport"></canvas>
+
+  <script>
+    /* __INJECTED_SPATIAL_DATA__ */
+    const SPATIAL_DATA = window.__SPATIAL_DATA__ || {
+      viewport: { width: 1280, height: 800 },
+      anomaliesCount: 0,
+      anomalies: [],
+      elements: []
+    };
+
+    document.getElementById('anomCount').innerText = SPATIAL_DATA.anomaliesCount;
+    document.getElementById('statTotal').innerText = SPATIAL_DATA.elements.length;
+    document.getElementById('statInter').innerText = SPATIAL_DATA.elements.filter(e => e.interactive).length;
+    document.getElementById('statAnom').innerText = SPATIAL_DATA.anomaliesCount;
+
+    // Three.js Scene Setup
+    const canvas = document.getElementById('viewport');
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0c0f14);
+
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 10000);
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+
+    // Center scene around viewport
+    const vw = SPATIAL_DATA.viewport.width;
+    const vh = SPATIAL_DATA.viewport.height;
+    
+    function resetCamera() {
+      camera.position.set(0, -vh * 0.45, Math.max(vw, vh) * 1.35);
+      controls.target.set(0, 0, 0);
+      controls.update();
+    }
+    resetCamera();
+
+    // Lighting
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.85);
+    scene.add(ambientLight);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.4);
+    dirLight.position.set(0, 500, 1000);
+    scene.add(dirLight);
+
+    // Grid Floor
+    const gridHelper = new THREE.GridHelper(Math.max(vw, vh) * 1.5, 30, 0x1e293b, 0x111827);
+    gridHelper.rotation.x = Math.PI / 2;
+    gridHelper.position.z = -20;
+    scene.add(gridHelper);
+
+    // Build 3D Layer Meshes
+    const meshes = [];
+    const elementsGroup = new THREE.Group();
+    scene.add(elementsGroup);
+
+    let zMultiplier = 18;
+    let globalOpacity = 0.75;
+    let wireframeMode = false;
+    let activeFilter = 'all';
+
+    SPATIAL_DATA.elements.forEach((item, index) => {
+      const w = Math.max(item.rect.w, 4);
+      const h = Math.max(item.rect.h, 4);
+      const geom = new THREE.PlaneGeometry(w, h);
+
+      // Determine Layer Color
+      let color = 0x334155; // Default Slate Glass
+      const hasColorAnomaly = item.issues && item.issues.some(i => i.type.includes('COLOR') || i.type.includes('CONTRAST'));
+      if (item.isBlocked) {
+        color = 0xef4444; // Red Anomaly / Occluded
+      } else if (hasColorAnomaly) {
+        color = 0xf59e0b; // Amber / Gold Color Camouflage
+      } else if (item.issues.length > 0) {
+        color = 0xf97316; // Orange Collision / Truncation
+      } else if (item.interactive) {
+        color = 0x10b981; // Green Interactive
+      } else if (item.text && item.text.length > 0) {
+        color = 0x38bdf8; // Blue Text
+      }
+
+      const mat = new THREE.MeshStandardMaterial({
+        color,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: item.isBlocked ? 0.92 : globalOpacity,
+        wireframe: wireframeMode,
+        roughness: 0.3,
+        metalness: 0.1
+      });
+
+      const mesh = new THREE.Mesh(geom, mat);
+      // Three.js coordinates: (0,0) is center, Y points UP, X points RIGHT
+      mesh.position.x = item.rect.x + item.rect.w / 2 - vw / 2;
+      mesh.position.y = -(item.rect.y + item.rect.h / 2 - vh / 2);
+      mesh.position.z = (item.calculatedZ || (item.stackingDepth * 40)) * (zMultiplier / 10);
+
+      // Edges outline
+      const edges = new THREE.EdgesGeometry(geom);
+      const edgeColor = item.isBlocked ? 0xffffff : (hasColorAnomaly ? 0xfde68a : (item.interactive ? 0xa7f3d0 : 0x64748b));
+      const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({
+        color: edgeColor,
+        transparent: true,
+        opacity: 0.4
+      }));
+      mesh.add(line);
+
+      mesh.userData = { item, originalColor: color, originalZ: (item.calculatedZ || (item.stackingDepth * 40)) / 10 };
+      elementsGroup.add(mesh);
+      meshes.push(mesh);
+    });
+
+    // Update Z positions dynamically when slider moves
+    function updateZPositions() {
+      meshes.forEach(m => {
+        m.position.z = m.userData.originalZ * zMultiplier;
+      });
+    }
+
+    // Raycasting for Element Inspection
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+    let hoveredMesh = null;
+
+    window.addEventListener('mousemove', (e) => {
+      mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+      mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+
+      raycaster.setFromCamera(mouse, camera);
+      const visibleMeshes = meshes.filter(m => m.visible);
+      const intersects = raycaster.intersectObjects(visibleMeshes, false);
+
+      if (intersects.length > 0) {
+        const topMesh = intersects[0].object;
+        if (hoveredMesh && hoveredMesh !== topMesh) {
+          hoveredMesh.material.emissive.setHex(0x000000);
+        }
+        hoveredMesh = topMesh;
+        hoveredMesh.material.emissive.setHex(0x4444ff);
+        updateInspectorHUD(hoveredMesh.userData.item);
+      } else if (hoveredMesh) {
+        hoveredMesh.material.emissive.setHex(0x000000);
+        hoveredMesh = null;
+      }
+    });
+
+    function updateInspectorHUD(item) {
+      const hasColorAnomaly = item.issues && item.issues.some(i => i.type.includes('COLOR') || i.type.includes('CONTRAST'));
+      const badgeCls = item.isBlocked ? 'badge-p0' : (hasColorAnomaly ? 'badge-p1' : (item.issues.length ? 'badge-p1' : 'badge-ok'));
+      const badgeText = item.isBlocked ? 'OCCLUDED' : (hasColorAnomaly ? 'COLOR ISSUE' : (item.issues.length ? 'WARNING' : 'OK'));
+
+      document.getElementById('insTitle').innerHTML = `${item.tag.toUpperCase()} <span class="badge ${badgeCls}">${badgeText}</span>`;
+      document.getElementById('insSel').innerText = item.selector;
+      document.getElementById('insPos').innerText = item.computed.position;
+      document.getElementById('insDepth').innerText = `Level ${item.stackingDepth}`;
+      document.getElementById('insZ').innerText = item.computed.zIndex;
+      document.getElementById('insDim').innerText = `${item.rect.w} × ${item.rect.h} px`;
+      document.getElementById('insText').innerText = item.text || '(empty)';
+
+      const colorsRow = document.getElementById('rowColors');
+      const contrastRow = document.getElementById('rowContrast');
+      if (item.colors && (item.colors.foreground || item.colors.effectiveBackground || item.colors.color || item.colors.backgroundColor)) {
+        colorsRow.style.display = 'flex';
+        const fg = item.colors.foreground || item.colors.color || '#fff';
+        const bg = item.colors.effectiveBackground || item.colors.backgroundColor || 'transparent';
+        document.getElementById('insColors').innerHTML = `
+          <span class="color-swatch-box"><span class="swatch-dot" style="background:${fg};"></span>FG</span>
+          <span class="color-swatch-box" style="margin-left:6px;"><span class="swatch-dot" style="background:${bg};"></span>BG</span>
+        `;
+        if (item.colors.similarity !== undefined) {
+          contrastRow.style.display = 'flex';
+          const sim = item.colors.similarity;
+          const cr = item.colors.contrastRatio !== undefined ? `${item.colors.contrastRatio}:1` : 'N/A';
+          const simColor = sim >= 70 ? '#f87171' : '#34d399';
+          document.getElementById('insContrast').innerHTML = `<span style="color:${simColor};font-weight:600;">${sim}% Match</span> (${cr})`;
+        } else {
+          contrastRow.style.display = 'none';
+        }
+      } else {
+        colorsRow.style.display = 'none';
+        contrastRow.style.display = 'none';
+      }
+
+      const alertBox = document.getElementById('insAlert');
+      if (item.isBlocked && item.blocker) {
+        alertBox.style.display = 'block';
+        alertBox.innerHTML = `⚠️ <b>Direct Click Blocked:</b> Element is covered by <code>${item.blocker.selector}</code> (z-index: ${item.blocker.zIndex}).`;
+      } else if (item.issues.length > 0) {
+        alertBox.style.display = 'block';
+        alertBox.innerHTML = `⚠️ <b>Layout Issue:</b> ${item.issues.map(i => i.detail).join('<br>')}`;
+      } else {
+        alertBox.style.display = 'none';
+      }
+    }
+
+    // UI Controls Handlers
+    document.getElementById('zScale').addEventListener('input', (e) => {
+      zMultiplier = parseFloat(e.target.value);
+      document.getElementById('zVal').innerText = `${zMultiplier}x`;
+      updateZPositions();
+    });
+
+    document.getElementById('layerOpacity').addEventListener('input', (e) => {
+      globalOpacity = parseFloat(e.target.value);
+      meshes.forEach(m => {
+        if (!m.userData.item.isBlocked) m.material.opacity = globalOpacity;
+      });
+    });
+
+    document.getElementById('btnWire').addEventListener('click', (e) => {
+      wireframeMode = !wireframeMode;
+      e.target.classList.toggle('active', wireframeMode);
+      meshes.forEach(m => m.material.wireframe = wireframeMode);
+    });
+
+    document.getElementById('btnReset').addEventListener('click', resetCamera);
+
+    // Filter Buttons
+    function applyFilter(mode) {
+      activeFilter = mode;
+      document.querySelectorAll('.hud-card .btn').forEach(b => {
+        if (['fAll','fBtn','fText','fColor','fAnom'].includes(b.id)) b.classList.remove('active');
+      });
+      meshes.forEach(m => {
+        const item = m.userData.item;
+        if (mode === 'all') m.visible = true;
+        else if (mode === 'buttons') m.visible = item.interactive;
+        else if (mode === 'text') m.visible = !!(item.text && item.text.length > 0);
+        else if (mode === 'color') {
+          m.visible = (item.issues && item.issues.some(i => i.type.includes('COLOR') || i.type.includes('CONTRAST'))) || (item.colors && item.colors.similarity >= 70);
+        }
+        else if (mode === 'anomalies') m.visible = item.isBlocked || item.issues.length > 0;
+      });
+    }
+
+    document.getElementById('fAll').addEventListener('click', (e) => { applyFilter('all'); e.target.classList.add('active'); });
+    document.getElementById('fBtn').addEventListener('click', (e) => { applyFilter('buttons'); e.target.classList.add('active'); });
+    document.getElementById('fText').addEventListener('click', (e) => { applyFilter('text'); e.target.classList.add('active'); });
+    document.getElementById('fColor').addEventListener('click', (e) => { applyFilter('color'); e.target.classList.add('active'); });
+    document.getElementById('fAnom').addEventListener('click', (e) => { applyFilter('anomalies'); e.target.classList.add('active'); });
+
+    // Window Resize
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // Animation Loop
+    function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    }
+    animate();
+  </script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "spatial-inspector": {
+      "command": "node",
+      "args": ["server.js"]
+    }
+  }
+}

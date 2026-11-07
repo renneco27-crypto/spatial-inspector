@@ -1,0 +1,20 @@
+{
+  "name": "spatial-inspector",
+  "displayName": "Spatial Layout & 3D Stacking Inspector",
+  "version": "1.0.0",
+  "description": "Inspects web UI for overlapping elements, blocked/occluded buttons, text collisions, z-index traps, and renders interactive 3D stacking context visualizers.",
+  "author": {
+    "name": "Antigravity Spatial Lab"
+  },
+  "keywords": [
+    "spatial",
+    "layout",
+    "overlap",
+    "z-index",
+    "stacking-context",
+    "collision-detection",
+    "3d-view",
+    "visual-regression",
+    "accessibility"
+  ]
+}
