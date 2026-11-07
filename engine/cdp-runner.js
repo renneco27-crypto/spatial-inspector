@@ -103,6 +103,114 @@ class CDPRunner {
       // Allow micro-animations and layouts to settle
       await new Promise(r => setTimeout(r, 400));
 
+      // 20 Broadened Theme Selector Patterns
+      const THEME_SELECTORS = [
+        '#theme',
+        '[data-theme-toggle]',
+        '[data-theme]',
+        '.theme-toggle',
+        '.theme-switch',
+        '.theme-btn',
+        '.mode-toggle',
+        '.dark-mode-toggle',
+        '.color-mode-toggle',
+        '[aria-label*="theme" i]',
+        '[aria-label*="dark" i]',
+        '[aria-label*="light" i]',
+        '[aria-label*="mode" i]',
+        '[title*="theme" i]',
+        '[title*="dark" i]',
+        '[title*="light" i]',
+        'button.theme',
+        'button.dark-mode',
+        'button.light-mode',
+        'button[id*="theme" i]'
+      ].join(', ');
+
+      // 20 Broadened Interactive Candidate Selector Patterns
+      const INTERACTIVE_SELECTORS = [
+        'button:not(:disabled)',
+        '[role="button"]',
+        'a[role="button"]',
+        'a.btn',
+        'a.button',
+        '.opt',
+        '.chip',
+        '.tab',
+        '[role="tab"]',
+        '.switch',
+        '[role="switch"]',
+        'summary',
+        'input[type="button"]',
+        'input[type="submit"]',
+        '[data-action]',
+        '[data-toggle]',
+        '[aria-expanded]',
+        '[aria-pressed]',
+        '.clickable',
+        '[onclick]'
+      ].join(', ');
+
+      // Detect in-page theme capabilities
+      const detectThemeScript = `
+        (() => {
+          const themeBtn = document.querySelector('${THEME_SELECTORS}');
+          let hasCssThemes = false;
+          try {
+            for (const sheet of document.styleSheets) {
+              try {
+                for (const rule of sheet.cssRules) {
+                  if (rule.media && rule.media.mediaText && rule.media.mediaText.includes('prefers-color-scheme')) hasCssThemes = true;
+                  if (rule.selectorText && (rule.selectorText.includes('data-theme') || rule.selectorText.includes('.dark') || rule.selectorText.includes('light-contrast'))) hasCssThemes = true;
+                }
+              } catch (e) {}
+            }
+          } catch (e) {}
+          return {
+            hasThemeBtn: !!themeBtn,
+            themeBtnSelector: themeBtn ? (themeBtn.id ? '#' + themeBtn.id : '.' + themeBtn.className.trim().split(/\\s+/)[0]) : null,
+            hasCssThemes
+          };
+        })()
+      `;
+      const themeDetRes = await send('Runtime.evaluate', { expression: detectThemeScript, returnByValue: true });
+      const themeInfo = (themeDetRes.result && themeDetRes.result.value) || { hasThemeBtn: false, hasCssThemes: false };
+
+      const themesToExplore = (themeInfo.hasThemeBtn || themeInfo.hasCssThemes) ? ['dark', 'light'] : ['default'];
+
+      async function applyTheme(targetTheme) {
+        if (targetTheme === 'default') return;
+        try {
+          await send('Emulation.setEmulatedMedia', {
+            media: 'screen',
+            features: [{ name: 'prefers-color-scheme', value: targetTheme }]
+          });
+        } catch (e) {}
+
+        const setPageScript = `
+          (() => {
+            const isTargetLight = '${targetTheme}' === 'light';
+            const themeBtn = document.querySelector('${THEME_SELECTORS}');
+            const isCurrentlyLight = document.body.classList.contains('light-contrast') ||
+                                     document.documentElement.dataset.theme === 'light' ||
+                                     document.documentElement.classList.contains('light');
+
+            if (isTargetLight !== isCurrentlyLight) {
+              if (themeBtn) {
+                themeBtn.click();
+              } else {
+                document.documentElement.dataset.theme = isTargetLight ? 'light' : 'dark';
+                document.documentElement.classList.toggle('dark', !isTargetLight);
+                document.documentElement.classList.toggle('light', isTargetLight);
+                document.body.classList.toggle('light-contrast', isTargetLight);
+              }
+            }
+          })()
+        `;
+        await send('Runtime.evaluate', { expression: setPageScript, returnByValue: true });
+        await new Promise(r => setTimeout(r, 350));
+      }
+
       // Execute Spatial Collector on Initial Baseline State
       const evalRes = await send('Runtime.evaluate', {
         expression: this.collectorScript,
@@ -110,120 +218,165 @@ class CDPRunner {
       });
       const initialData = evalRes.result ? evalRes.result.value : null;
 
-      const allAnomalies = initialData ? [...initialData.anomalies] : [];
-      const statesExplored = [{
-        name: 'Initial Page Load',
-        totalElements: initialData ? initialData.totalElements : 0,
-        anomaliesCount: initialData ? initialData.anomaliesCount : 0
-      }];
+      const allAnomalies = [];
+      const statesExplored = [];
 
-      // Interactive Button State Exploration (clicks buttons and checks for revealed divs & color mismatches)
+      // Interactive Multi-Theme & Button State Exploration (up to 20 candidate terms)
       if (options.exploreStates !== false && initialData) {
         try {
-          const discoverScript = `
-            (() => {
-              const els = Array.from(document.querySelectorAll('button:not(:disabled), [role="button"], .opt, .chip, #theme, #sol, #nq'));
-              return els.slice(0, 12).map((el, idx) => {
-                let sel = el.id ? ('#' + el.id) : (el.className && typeof el.className === 'string' ? '.' + el.className.trim().split(/\\s+/).filter(c => c && !c.includes(':'))[0] : el.tagName.toLowerCase());
-                return {
-                  idx,
-                  selector: sel,
-                  id: el.id || null,
-                  text: (el.innerText || el.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 30)
-                };
-              });
-            })()
-          `;
-          const discRes = await send('Runtime.evaluate', { expression: discoverScript, returnByValue: true });
-          const candidates = discRes.result ? discRes.result.value : [];
+          for (const currentTheme of themesToExplore) {
+            const themeTag = currentTheme.toUpperCase();
 
-          for (const cand of candidates) {
-            // Fresh navigation for clean state
+            // Baseline for this theme
             await send('Page.navigate', { url: targetUrl });
             await waitForEvent('Page.loadEventFired', 3000);
             await new Promise(r => setTimeout(r, 250));
+            await applyTheme(currentTheme);
 
-            const clickExpr = `
-              (() => {
-                const els = Array.from(document.querySelectorAll('button:not(:disabled), [role="button"], .opt, .chip, #theme, #sol, #nq'));
-                const targetEl = els[${cand.idx}];
-                if (targetEl) {
-                  targetEl.click();
-                  return { success: true };
-                }
-                return { success: false };
-              })()
-            `;
-            await send('Runtime.evaluate', { expression: clickExpr, returnByValue: true });
-            await new Promise(r => setTimeout(r, 350));
+            const baseEval = await send('Runtime.evaluate', { expression: this.collectorScript, returnByValue: true });
+            const baseData = baseEval.result ? baseEval.result.value : null;
 
-            const stateEval = await send('Runtime.evaluate', { expression: this.collectorScript, returnByValue: true });
-            const stateData = stateEval.result ? stateEval.result.value : null;
-
-            if (stateData) {
-              const stateName = `Click on ${cand.selector}${cand.text ? ' ("' + cand.text + '")' : ''}`;
+            if (baseData) {
               statesExplored.push({
-                name: stateName,
-                totalElements: stateData.totalElements,
-                anomaliesCount: stateData.anomaliesCount
+                theme: currentTheme,
+                name: `[Theme: ${themeTag}] Baseline View`,
+                totalElements: baseData.totalElements,
+                anomaliesCount: baseData.anomaliesCount
               });
 
-              stateData.anomalies.forEach(a => {
+              baseData.anomalies.forEach(a => {
                 const isDup = allAnomalies.some(existing =>
                   existing.type === a.type &&
+                  existing.theme === currentTheme &&
                   (existing.target === a.target || (existing.elementA === a.elementA && existing.elementB === a.elementB))
                 );
                 if (!isDup) {
                   allAnomalies.push({
-                    stateContext: stateName,
+                    theme: currentTheme,
+                    stateContext: `[Theme: ${themeTag}] Baseline View`,
                     ...a,
-                    detail: `[State: ${stateName}] ${a.detail}`
+                    detail: `[Theme: ${themeTag}] ${a.detail}`
                   });
                 }
               });
+            }
 
-              // Check if any secondary modal/sheet action became enabled (e.g. #sol "Show solution")
-              const secondaryExpr = `
+            // Discover up to 20 candidate interactive elements (excluding theme switcher)
+            const discoverScript = `
+              (() => {
+                const themeBtn = document.querySelector('${THEME_SELECTORS}');
+                const all = Array.from(document.querySelectorAll('${INTERACTIVE_SELECTORS}'));
+                const filtered = all.filter(el => el !== themeBtn && !el.closest('${THEME_SELECTORS}'));
+                return filtered.slice(0, 20).map((el, idx) => {
+                  let sel = el.id ? ('#' + el.id) : (el.className && typeof el.className === 'string' ? '.' + el.className.trim().split(/\\s+/).filter(c => c && !c.includes(':'))[0] : el.tagName.toLowerCase());
+                  return {
+                    idx,
+                    selector: sel,
+                    id: el.id || null,
+                    text: (el.innerText || el.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 30)
+                  };
+                });
+              })()
+            `;
+            const discRes = await send('Runtime.evaluate', { expression: discoverScript, returnByValue: true });
+            const candidates = discRes.result ? discRes.result.value : [];
+
+            for (const cand of candidates) {
+              await send('Page.navigate', { url: targetUrl });
+              await waitForEvent('Page.loadEventFired', 3000);
+              await new Promise(r => setTimeout(r, 200));
+              await applyTheme(currentTheme);
+
+              const clickExpr = `
                 (() => {
-                  const secondaryBtn = document.querySelector('#sol, [aria-haspopup="dialog"], .sheet-toggle');
-                  if (secondaryBtn && !secondaryBtn.disabled) {
-                    secondaryBtn.click();
-                    return { clicked: true, text: (secondaryBtn.innerText || secondaryBtn.textContent || '').trim().slice(0, 20) };
+                  const themeBtn = document.querySelector('${THEME_SELECTORS}');
+                  const all = Array.from(document.querySelectorAll('${INTERACTIVE_SELECTORS}'));
+                  const filtered = all.filter(el => el !== themeBtn && !el.closest('${THEME_SELECTORS}'));
+                  const targetEl = filtered[${cand.idx}];
+                  if (targetEl) {
+                    targetEl.click();
+                    return { success: true };
                   }
-                  return { clicked: false };
+                  return { success: false };
                 })()
               `;
-              const secRes = await send('Runtime.evaluate', { expression: secondaryExpr, returnByValue: true });
-              if (secRes.result && secRes.result.value && secRes.result.value.clicked) {
-                await new Promise(r => setTimeout(r, 400));
-                const secEval = await send('Runtime.evaluate', { expression: this.collectorScript, returnByValue: true });
-                const secData = secEval.result ? secEval.result.value : null;
-                if (secData) {
-                  const secStateName = `${stateName} -> Click "${secRes.result.value.text}" (Revealed Sheet/Modal)`;
-                  statesExplored.push({
-                    name: secStateName,
-                    totalElements: secData.totalElements,
-                    anomaliesCount: secData.anomaliesCount
-                  });
-                  secData.anomalies.forEach(a => {
-                    const isDup = allAnomalies.some(existing =>
-                      existing.type === a.type &&
-                      (existing.target === a.target || (existing.elementA === a.elementA && existing.elementB === a.elementB))
-                    );
-                    if (!isDup) {
-                      allAnomalies.push({
-                        stateContext: secStateName,
-                        ...a,
-                        detail: `[State: ${secStateName}] ${a.detail}`
-                      });
+              await send('Runtime.evaluate', { expression: clickExpr, returnByValue: true });
+              await new Promise(r => setTimeout(r, 350));
+
+              const stateEval = await send('Runtime.evaluate', { expression: this.collectorScript, returnByValue: true });
+              const stateData = stateEval.result ? stateEval.result.value : null;
+
+              if (stateData) {
+                const stateName = `[Theme: ${themeTag}] Click on ${cand.selector}${cand.text ? ' ("' + cand.text + '")' : ''}`;
+                statesExplored.push({
+                  theme: currentTheme,
+                  name: stateName,
+                  totalElements: stateData.totalElements,
+                  anomaliesCount: stateData.anomaliesCount
+                });
+
+                stateData.anomalies.forEach(a => {
+                  const isDup = allAnomalies.some(existing =>
+                    existing.type === a.type &&
+                    existing.theme === currentTheme &&
+                    (existing.target === a.target || (existing.elementA === a.elementA && existing.elementB === a.elementB))
+                  );
+                  if (!isDup) {
+                    allAnomalies.push({
+                      theme: currentTheme,
+                      stateContext: stateName,
+                      ...a,
+                      detail: `[Theme: ${themeTag}] ${a.detail}`
+                    });
+                  }
+                });
+
+                // Secondary action check (e.g. #sol "Show solution", dialogs, drawers)
+                const secondaryExpr = `
+                  (() => {
+                    const secondaryBtn = document.querySelector('#sol, [aria-haspopup="dialog"], .sheet-toggle');
+                    if (secondaryBtn && !secondaryBtn.disabled) {
+                      secondaryBtn.click();
+                      return { clicked: true, text: (secondaryBtn.innerText || secondaryBtn.textContent || '').trim().slice(0, 20) };
                     }
-                  });
+                    return { clicked: false };
+                  })()
+                `;
+                const secRes = await send('Runtime.evaluate', { expression: secondaryExpr, returnByValue: true });
+                if (secRes.result && secRes.result.value && secRes.result.value.clicked) {
+                  await new Promise(r => setTimeout(r, 400));
+                  const secEval = await send('Runtime.evaluate', { expression: this.collectorScript, returnByValue: true });
+                  const secData = secEval.result ? secEval.result.value : null;
+                  if (secData) {
+                    const secStateName = `${stateName} -> Click "${secRes.result.value.text}" (Revealed Sheet/Modal)`;
+                    statesExplored.push({
+                      theme: currentTheme,
+                      name: secStateName,
+                      totalElements: secData.totalElements,
+                      anomaliesCount: secData.anomaliesCount
+                    });
+                    secData.anomalies.forEach(a => {
+                      const isDup = allAnomalies.some(existing =>
+                        existing.type === a.type &&
+                        existing.theme === currentTheme &&
+                        (existing.target === a.target || (existing.elementA === a.elementA && existing.elementB === a.elementB))
+                      );
+                      if (!isDup) {
+                        allAnomalies.push({
+                          theme: currentTheme,
+                          stateContext: secStateName,
+                          ...a,
+                          detail: `[Theme: ${themeTag}] ${a.detail}`
+                        });
+                      }
+                    });
+                  }
                 }
               }
             }
           }
         } catch (e) {
-          // Soft fail for state exploration
+          // Soft fail for interactive exploration
         }
       }
 
@@ -231,6 +384,7 @@ class CDPRunner {
         initialData.anomalies = allAnomalies;
         initialData.anomaliesCount = allAnomalies.length;
         initialData.statesExplored = statesExplored;
+        initialData.themesExplored = themesToExplore;
       }
 
       let screenshot = null;

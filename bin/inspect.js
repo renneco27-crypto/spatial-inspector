@@ -37,6 +37,9 @@ async function main() {
     console.log(`\n========================================`);
     console.log(` SPATIAL AUDIT SUMMARY:`);
     console.log(` Total Elements Scanned: ${data.totalElements}`);
+    if (data.themesExplored && data.themesExplored.length > 0) {
+      console.log(` Themes Explored:        ${data.themesExplored.map(t => t.toUpperCase()).join(', ')}`);
+    }
     if (data.statesExplored && data.statesExplored.length > 1) {
       console.log(` Interactive States:     ${data.statesExplored.length} explored`);
     }

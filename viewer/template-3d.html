@@ -221,6 +221,13 @@
       <button class="btn" id="fColor">Color / Contrast</button>
       <button class="btn btn-anomaly" id="fAnom">Anomalies (<span id="anomCount">0</span>)</button>
     </div>
+
+    <div class="hud-card" id="cardThemeFilter">
+      <span style="font-size:11px; font-weight:700; color:#94a3b8; text-transform:uppercase;">Theme:</span>
+      <button class="btn active" id="fThAll">All</button>
+      <button class="btn" id="fThDark">Dark</button>
+      <button class="btn" id="fThLight">Light</button>
+    </div>
   </div>
 
   <div class="hud-inspector" id="inspectorCard">
@@ -233,6 +240,8 @@
     <div class="hud-row"><span>Text Snippet</span><span id="insText" style="max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">-</span></div>
     <div class="hud-row" id="rowColors" style="display:none;"><span>Colors</span><span id="insColors">-</span></div>
     <div class="hud-row" id="rowContrast" style="display:none;"><span>Color / Contrast</span><span id="insContrast">-</span></div>
+    <div class="hud-row" id="rowTheme" style="display:none;"><span>Theme Mode</span><span id="insTheme">-</span></div>
+    <div class="hud-row" id="rowState" style="display:none;"><span>State Context</span><span id="insState" style="max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">-</span></div>
     <div class="hud-alert" id="insAlert" style="display:none;"></div>
   </div>
 
@@ -428,6 +437,21 @@
         contrastRow.style.display = 'none';
       }
 
+      const themeRow = document.getElementById('rowTheme');
+      const stateRow = document.getElementById('rowState');
+      if (item.theme) {
+        themeRow.style.display = 'flex';
+        document.getElementById('insTheme').innerHTML = `<span class="badge" style="background:${item.theme === 'light' ? '#f59e0b' : '#3b82f6'};">${item.theme.toUpperCase()}</span>`;
+      } else {
+        themeRow.style.display = 'none';
+      }
+      if (item.stateContext) {
+        stateRow.style.display = 'flex';
+        document.getElementById('insState').innerText = item.stateContext;
+      } else {
+        stateRow.style.display = 'none';
+      }
+
       const alertBox = document.getElementById('insAlert');
       if (item.isBlocked && item.blocker) {
         alertBox.style.display = 'block';
@@ -463,21 +487,40 @@
     document.getElementById('btnReset').addEventListener('click', resetCamera);
 
     // Filter Buttons
-    function applyFilter(mode) {
-      activeFilter = mode;
-      document.querySelectorAll('.hud-card .btn').forEach(b => {
-        if (['fAll','fBtn','fText','fColor','fAnom'].includes(b.id)) b.classList.remove('active');
-      });
+    let activeThemeFilter = 'all';
+
+    function updateVisibility() {
       meshes.forEach(m => {
         const item = m.userData.item;
-        if (mode === 'all') m.visible = true;
-        else if (mode === 'buttons') m.visible = item.interactive;
-        else if (mode === 'text') m.visible = !!(item.text && item.text.length > 0);
-        else if (mode === 'color') {
-          m.visible = (item.issues && item.issues.some(i => i.type.includes('COLOR') || i.type.includes('CONTRAST'))) || (item.colors && item.colors.similarity >= 70);
+
+        // Type filter check
+        let typePass = true;
+        if (activeFilter === 'buttons') typePass = item.interactive;
+        else if (activeFilter === 'text') typePass = !!(item.text && item.text.length > 0);
+        else if (activeFilter === 'color') {
+          typePass = (item.issues && item.issues.some(i => i.type.includes('COLOR') || i.type.includes('CONTRAST'))) || (item.colors && item.colors.similarity >= 70);
         }
-        else if (mode === 'anomalies') m.visible = item.isBlocked || item.issues.length > 0;
+        else if (activeFilter === 'anomalies') typePass = item.isBlocked || (item.issues && item.issues.length > 0);
+
+        // Theme filter check
+        let themePass = true;
+        if (activeThemeFilter === 'dark') themePass = !item.theme || item.theme === 'dark';
+        else if (activeThemeFilter === 'light') themePass = !item.theme || item.theme === 'light';
+
+        m.visible = typePass && themePass;
       });
+    }
+
+    function applyFilter(mode) {
+      activeFilter = mode;
+      document.querySelectorAll('#fAll, #fBtn, #fText, #fColor, #fAnom').forEach(b => b.classList.remove('active'));
+      updateVisibility();
+    }
+
+    function applyThemeFilter(theme) {
+      activeThemeFilter = theme;
+      document.querySelectorAll('#fThAll, #fThDark, #fThLight').forEach(b => b.classList.remove('active'));
+      updateVisibility();
     }
 
     document.getElementById('fAll').addEventListener('click', (e) => { applyFilter('all'); e.target.classList.add('active'); });
@@ -485,6 +528,10 @@
     document.getElementById('fText').addEventListener('click', (e) => { applyFilter('text'); e.target.classList.add('active'); });
     document.getElementById('fColor').addEventListener('click', (e) => { applyFilter('color'); e.target.classList.add('active'); });
     document.getElementById('fAnom').addEventListener('click', (e) => { applyFilter('anomalies'); e.target.classList.add('active'); });
+
+    document.getElementById('fThAll').addEventListener('click', (e) => { applyThemeFilter('all'); e.target.classList.add('active'); });
+    document.getElementById('fThDark').addEventListener('click', (e) => { applyThemeFilter('dark'); e.target.classList.add('active'); });
+    document.getElementById('fThLight').addEventListener('click', (e) => { applyThemeFilter('light'); e.target.classList.add('active'); });
 
     // Window Resize
     window.addEventListener('resize', () => {

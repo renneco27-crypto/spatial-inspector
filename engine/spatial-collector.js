@@ -75,10 +75,14 @@
       } catch (e) {}
     }
 
-    // Fallback to body / html background, default white
+    // Fallback to body / html background, default white for light theme, dark slate for dark theme
     const bodyBg = window.getComputedStyle(document.body).backgroundColor;
     const parsedBody = parseRgba(bodyBg);
-    let finalColor = (parsedBody && parsedBody.a > 0.05) ? parsedBody : { r: 255, g: 255, b: 255, a: 1 };
+    const isExplicitLight = document.documentElement.dataset.theme === 'light' ||
+                            document.body.classList.contains('light-contrast') ||
+                            document.documentElement.classList.contains('light');
+    const defaultCanvas = isExplicitLight ? { r: 255, g: 255, b: 255, a: 1 } : { r: 15, g: 17, b: 21, a: 1 };
+    let finalColor = (parsedBody && parsedBody.a > 0.05) ? parsedBody : defaultCanvas;
 
     for (let i = layers.length - 1; i >= 0; i--) {
       finalColor = alphaComposite(layers[i], finalColor);
