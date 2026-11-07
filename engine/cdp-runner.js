@@ -103,11 +103,135 @@ class CDPRunner {
       // Allow micro-animations and layouts to settle
       await new Promise(r => setTimeout(r, 400));
 
-      // Execute Spatial Collector
+      // Execute Spatial Collector on Initial Baseline State
       const evalRes = await send('Runtime.evaluate', {
         expression: this.collectorScript,
         returnByValue: true
       });
+      const initialData = evalRes.result ? evalRes.result.value : null;
+
+      const allAnomalies = initialData ? [...initialData.anomalies] : [];
+      const statesExplored = [{
+        name: 'Initial Page Load',
+        totalElements: initialData ? initialData.totalElements : 0,
+        anomaliesCount: initialData ? initialData.anomaliesCount : 0
+      }];
+
+      // Interactive Button State Exploration (clicks buttons and checks for revealed divs & color mismatches)
+      if (options.exploreStates !== false && initialData) {
+        try {
+          const discoverScript = `
+            (() => {
+              const els = Array.from(document.querySelectorAll('button:not(:disabled), [role="button"], .opt, .chip, #theme, #sol, #nq'));
+              return els.slice(0, 12).map((el, idx) => {
+                let sel = el.id ? ('#' + el.id) : (el.className && typeof el.className === 'string' ? '.' + el.className.trim().split(/\\s+/).filter(c => c && !c.includes(':'))[0] : el.tagName.toLowerCase());
+                return {
+                  idx,
+                  selector: sel,
+                  id: el.id || null,
+                  text: (el.innerText || el.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 30)
+                };
+              });
+            })()
+          `;
+          const discRes = await send('Runtime.evaluate', { expression: discoverScript, returnByValue: true });
+          const candidates = discRes.result ? discRes.result.value : [];
+
+          for (const cand of candidates) {
+            // Fresh navigation for clean state
+            await send('Page.navigate', { url: targetUrl });
+            await waitForEvent('Page.loadEventFired', 3000);
+            await new Promise(r => setTimeout(r, 250));
+
+            const clickExpr = `
+              (() => {
+                const els = Array.from(document.querySelectorAll('button:not(:disabled), [role="button"], .opt, .chip, #theme, #sol, #nq'));
+                const targetEl = els[${cand.idx}];
+                if (targetEl) {
+                  targetEl.click();
+                  return { success: true };
+                }
+                return { success: false };
+              })()
+            `;
+            await send('Runtime.evaluate', { expression: clickExpr, returnByValue: true });
+            await new Promise(r => setTimeout(r, 350));
+
+            const stateEval = await send('Runtime.evaluate', { expression: this.collectorScript, returnByValue: true });
+            const stateData = stateEval.result ? stateEval.result.value : null;
+
+            if (stateData) {
+              const stateName = `Click on ${cand.selector}${cand.text ? ' ("' + cand.text + '")' : ''}`;
+              statesExplored.push({
+                name: stateName,
+                totalElements: stateData.totalElements,
+                anomaliesCount: stateData.anomaliesCount
+              });
+
+              stateData.anomalies.forEach(a => {
+                const isDup = allAnomalies.some(existing =>
+                  existing.type === a.type &&
+                  (existing.target === a.target || (existing.elementA === a.elementA && existing.elementB === a.elementB))
+                );
+                if (!isDup) {
+                  allAnomalies.push({
+                    stateContext: stateName,
+                    ...a,
+                    detail: `[State: ${stateName}] ${a.detail}`
+                  });
+                }
+              });
+
+              // Check if any secondary modal/sheet action became enabled (e.g. #sol "Show solution")
+              const secondaryExpr = `
+                (() => {
+                  const secondaryBtn = document.querySelector('#sol, [aria-haspopup="dialog"], .sheet-toggle');
+                  if (secondaryBtn && !secondaryBtn.disabled) {
+                    secondaryBtn.click();
+                    return { clicked: true, text: (secondaryBtn.innerText || secondaryBtn.textContent || '').trim().slice(0, 20) };
+                  }
+                  return { clicked: false };
+                })()
+              `;
+              const secRes = await send('Runtime.evaluate', { expression: secondaryExpr, returnByValue: true });
+              if (secRes.result && secRes.result.value && secRes.result.value.clicked) {
+                await new Promise(r => setTimeout(r, 400));
+                const secEval = await send('Runtime.evaluate', { expression: this.collectorScript, returnByValue: true });
+                const secData = secEval.result ? secEval.result.value : null;
+                if (secData) {
+                  const secStateName = `${stateName} -> Click "${secRes.result.value.text}" (Revealed Sheet/Modal)`;
+                  statesExplored.push({
+                    name: secStateName,
+                    totalElements: secData.totalElements,
+                    anomaliesCount: secData.anomaliesCount
+                  });
+                  secData.anomalies.forEach(a => {
+                    const isDup = allAnomalies.some(existing =>
+                      existing.type === a.type &&
+                      (existing.target === a.target || (existing.elementA === a.elementA && existing.elementB === a.elementB))
+                    );
+                    if (!isDup) {
+                      allAnomalies.push({
+                        stateContext: secStateName,
+                        ...a,
+                        detail: `[State: ${secStateName}] ${a.detail}`
+                      });
+                    }
+                  });
+                }
+              }
+            }
+          }
+        } catch (e) {
+          // Soft fail for state exploration
+        }
+      }
+
+      if (initialData) {
+        initialData.anomalies = allAnomalies;
+        initialData.anomaliesCount = allAnomalies.length;
+        initialData.statesExplored = statesExplored;
+      }
 
       let screenshot = null;
       if (options.captureScreenshot) {
@@ -119,7 +243,7 @@ class CDPRunner {
       return {
         success: true,
         url: targetUrl,
-        spatialData: evalRes.result ? evalRes.result.value : null,
+        spatialData: initialData,
         screenshot
       };
     } finally {
